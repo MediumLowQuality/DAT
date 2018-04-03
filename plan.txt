@@ -1,0 +1,120 @@
+Handler Quest:
+- the handler quest should provide utility for other scripts
+- some scripts will require new, unpopulated instances of formlists
+- naturally, papyrus doesn't support instantiating new objects
+- to simulate this, the handler quest will maintain a formlist of formlists. other scripts can request a formlist from the handler quest. the handler quest will track which actors are using which formlists, and therefore which can be distributed freely.
+- other scripts will have to release the formlist when done with it. currently debating building in some way to force actors to release form lists, to be called if we somehow run out.
+- the handler quest will also provide MCM support. this is already a fucking mess, and we've only added controllers for the injury system. so that's nice.
+
+Traits:
+- General idea in plain English:
+
+To differentiate dragon fights from each other, dragons should have various different passive abilities. Some can be simple stat boosts. Others can be things that trigger on animating. More can be Shouts or spells the dragon would not usually have. In the future, we may want to consider limit breaks, as that was actually an interesting idea.
+The goal is to differentiate dragon fights by what the dragon is capable of. The specific ability loadout will be dragon-unique, not fight-unique. Players can learn and adapt to each dragon, but not necessarily to all dragons.
+Traits should be based on archetypes. Dragons can learn traits from multiple archetypes, but should be focused on single archetypes. The archetype should have a trait that provides passive boosts based on the amount of traits from that tree.
+
+- handler quest should maintain a means of identifying dragons, what traits they are and are not eligible for, and handling dragons a formlist with those traits
+- dragon selects a few/removes the rest, adds the traits to themself. maybe release the formlist at this point? Maybe also hold onto it until unloading. Decisions.
+
+- Archetypes:
+	- Fire Dragon: basic fire based abilities. exclusive to fire dragons.
+	- Frost Dragon: basic frost based abilities. exclusive to frost dragons.
+	- Brute: makes the dragon more physically powerful.
+	- Silvertongue: makes the dragon's Shouts more powerful.
+	- Bones of Earth: focuses on poison, animal taming, spriggans, weather.
+	- Wings of Oblivion: focuses on summons, undeath, and the like. Can be vampiric. Also, weak to silver and takes damage from banish effects.
+	- Thur Kroniid (Overlord Conqueror): should focus on the psychological aspects of fighting a dragon. basically heavy debuffs and statuses. Anti-regen, anti-Shout cooldown. Maybe basilisk, eye-contact paralysis kind of deal?
+	
+- each archetype has an opposite archetype, except Thur Kroniid. Because of that, we can work this in spherical coordinates.
+- fixed radius, or roll for radius based on dragon level. Roll for theta (angle from brute-silvertongue axis, in the brute-silvertongue/bones-wings plane) and phi (azimuthal; angle from appropriate element, controls offset from x-y plane).
+- thur kroniid should be rolled based on level; its effects are probably going to be the most powerful, and the player probably should not frequently run into effects they're not equipped for.
+- generally most dragons should have low thur kroniid scores, even at higher levels. Specific dragons, like Odahviing, Alduin, Durnehviir, and Paarthurnax should have high ones. Top-tier non-unique dragons should have high-ish ones, but not that high.
+
+Injuries:
+- General idea in plain English:
+
+Dragons should not be injured once at 35% of their health. This makes the early part of the fight a slog to reach that 35%, and makes the remainder very predictable. Under the new system, any hit has a chance to injure the dragon. This chance should increase as the dragon reaches lower health; it makes sense that a dragon who has suffered a lot of little wounds will suffer a more serious one. However, for gameplay purposes, the dragon should not just be perpetually injured once below a certain threshold; that's already a significant design problem in the vanilla game. So the chance for any hit to injure the dragon should decrease with the number of times the dragon has been injured. The end result should be a system where a dragon will be injured more frequently when it's hurt, and can be hurt several times in a row, but usually won't be, with some significant randomness thrown in. This will also make players less reliant on Dragonrend to force dragons to land early in the fight; any hit now has a chance to temporarily land the dragon. Dragons will also not be immediately neutered at 35% of their health, allowing the fight to retain some difficulty in the later stages.
+Each injury does have a chance to be permanent. This chance will increase with damage dealt and the number of injuries sustained; this is to prevent the gameplay loop of "force dragon to land, damage dragon, dragon flies away, get fucked if you use melee" from getting stale, and should be random enough that dragons are not always gimped at the same health value like in vanilla. Theoretically it can happen on the first injury, and sometimes it will happen on the first injury. Usually, it will not happen for several injuries, and sometimes it may not happen at all. This one is significantly harder to predict than injuries happening at all due to relying on when dragons are injured and how frequently that happens.
+If the injury is not permanent, it should wear off eventually. An even distribution here doesn't make sense; if you're shooting for an average time of 30 seconds on the range (0, 90], dragons should not recover at 0 seconds as frequently as they do at 32. Instead, dragons should recover on a normal distribution; usually pretty close to the average time, but with some significant variance clustered around that time. This satisfies both unpredictability and playability criteria; players will have a significant window to attack, but the specific length of that window will vary. For the normal distribution chosen, mu = 35, sigma = 15, and results are clamped on [0.01, 90]. To prevent probability from pooling at the clamps, sigma should be about min([mu - lower clamp]/z|, [upper clamp - mu]/z) where z >= 2 and specific values will depend on user's tolerance for pooling. For the defaults, z = -2.33 for the lower clamp, and for the upper clamp z = 3.67. These values can be looked up in a z-score table to evaluate the likelihood that the clamp will be returned instead of a value outside of the clamps. There is 0.99% chance of a value beneath the lower clamp being rolled, and a functionally negligible chance of a value above the upper clamp being rolled.
+
+- vanilla injury threshold is handled by a float on the race's combat data tab
+- dragon races should be set to 0; injuries should be handled using our system
+- to compensate, if the injury handler is off, the dragon should just be auto-injured and crippled below 35% health (the vanilla value on the race record that was set to 0).
+- If the injury handler is on, any hit has a chance to injure the dragon.
+- The chance to be injured by any hit under our system is given by (default values for constants are in parentheses):
+
+pInjury = ([pMax - pBase] * [1 - h]^k1 + pBase)/(1 + k2 * n)^k3
+
+pMax:  absolute maximum chance to injure (0.25)
+pBase: base chance of the first injury at 100% health (0.05)
+h:     ratio of dragon's current health to max health
+n:     the number of injuries the dragon has sustained so far
+k1:    a constant determining the weight of the dragon's current health on the chance to injure the dragon (2.5)
+k2:    a constant scaling the dragon's total injuries (0.33333)
+k3:    a constant determining the weight of the dragon's total injuries on the chance to injure the dragon (1.5)
+
+- Each injury has a chance to be "crippling," which means the dragon will not recover from the injury regularly.
+- The chance for an injury to be crippling is given by:
+
+pCripple = k1 * (1 - h)^k2 * (k3 * n + k4)^k5 + pBase
+
+pBase: base chance for any injury to be crippling (0.05)
+h:     ratio of dragon's current health to max health
+n:     the number of injuries sustained so far (incremented before calculating the cripple chance under the current script)
+k1:    a constant that scales the variable portion of this expression (0.05)
+k2:    a constant that determines the weight of the dragon's remaining health (0.75)
+k3:    a constant that scales the number of injuries the dragon has sustained (6)
+k4:    an offset to the number of injuries the dragon has sustained (2)
+k5:    a constant that determines the weight of the dragon's total injuries (0.5)
+
+- If not crippling, each injury will last for a normally distributed time on the range [lClamp, uClamp] with mean mu and std. dev. sigma
+
+lClamp: the minimum time an injury can last; if the intended result is less than lClamp, lClamp is returned (0.01)
+uClamp: the maximum time an injury can last; if the intended result is greater than uClamp, uClamp is returned (90.0)
+mu:     the average duration of an injury, if the normal distribution were unclamped (35.0)
+sigma:  the standard deviation of an injury duration; generally, 60% of results will be within +- 1 sigma of mu, 95% will be within +- 2, and 99% will be within +- 3 (15.0)
+To avoid significant pooling of probability at the clamps, it is recommended that lClamp < mu - k*sigma and uClamp > mu + k*sigma, where k is at least 2 or 3 depending on how acceptable clamp pooling is (~2.5%/~0.5% chance of each clamp for k = 2 and 3, respectively). MLQ_NormalDistribution comes with functions to evaluate clamp pooling for other values.
+
+- Injury is handled by adding an ability with a constant effect actor value modifier applied to the dragonrend AV, not using setAllowFlying()
+- Dragonrend effects should override setAllowFlying(), and not be unintentionally overwritten by another mod (the spell can be removed intentionally, but only intentionally, so that's ideal)
+- At this time, crippling does not add any externally-observable effects, and is handled by a private bool, not a property. This can be changed in the future if necessary for other mods/scripts to check if the dragon is crippled.
+- Duration does not currently scale with anything. This may be changed in the future, but this is probably ideal since dragon chances of injury and crippling already increase with lowered health.
+- Duration does not begin counting until the update event after the dragon has landed.
+
+Force Kill:
+- General idea in plain English:
+
+The most annoying thing about dragon fights is when their health is depleted and they have to continue flying around all the time while they look for someplace to land, because Bethesda thought their death animation was really cool and should have no aerial counterpart. Similarly, one of the more noticeable (in a good way) things that DCO did was force-killing dragons who were flying, knocking them out of the air in the process.
+Under this system, if a dragon is flying when its HP drops below a certain threshold, the dragon's velocity is measured, the dragon is force-killed, and then havok-impulsed back to the measured velocity (since it just stops when it ragdolls).
+
+- on hit, check if health is below the force-kill threshold
+- controlling global states in binary and decimal:
+
+00 (0): no force kills are enabled
+01 (1): air force kills are enabled
+10 (2): ground force kills are enabled
+11 (3): air and ground force kills are enabled
+- if health is below threshold and dragon is on the ground and ground force kills are enabled, or dragon is in the air and air force kills are enabled, proceed; otherwise back out.
+- Measure coordinates, wait a short interval, remeasure, determine average velocity and call it instantaneous velocity (basically closest we can get).
+- Force-kill by starting and ending deffered kill state rapidly, since that seems to be the only thing that overrides the engine's "dragons can't die without animating" deal
+- force the body into the ragdoll state
+- apply havok impulse with the measured velocity
+- it should probably be checked that this doesn't break any quests, and that this doesn't trigger when the dragon is already on the ground
+
+Soul Capturing:
+- General idea in plain English:
+
+Other dragons should be able to capture souls, so long as the player can get them when the other dragon dies; this'd be kinda neat and fit with the lore that you can capture souls because you have a dragon soul. Bethesda basically already implemented this for other actors in Dragonborn, they just only ever use it for Miraak. The main reason it doesn't seems to be because the main script uses a while loop for the player distance (which is probably bad design on its own since it will continue to evaluate the player's distance all of the time until the player gets the soul) and the way to implement a check for all possible actors takes more than 5 seconds of thought.
+Dragons will fire off a scripted AoE spell on a single update loop after dying. The spell's effect is scripted to cast a target actor spell back on the original caster if the original target is a dragon or the player (Miraak's soul absorbtion is handled elsewhere, so that's not a problem). The dragon, on being hit with this spell, will identify the caster and their distance. If the distance is less than the FXRange global (which you can now set directly because it's no longer a script property) and less than the nearest other actor if one's been identified, then the actor will be identified as the nearest possible soul absorbing target. When the script next updates, if the dragon has a target, then it stops casting the spell and plays the soul absorbtion effects targeting the nearest actor. The nearest actor gets all of its dragon souls.
+
+- If the system is enabled, onDying (which fires before onDeath) will set the dragon's DragonActorScript to the DeadDisintegrated state to suppress its onDeath Event, which is supposed to happen before going to that state.
+- The script will then transition to its own DeadWaiting state; if inactive, it will go to the DeadComplete state.
+- Entering the DeadWaiting state triggers an AoE spell to be cast
+- AoE spell evaluates if targets are human or dragon, if so, they cast a pingback spell on the dragon
+- when hit with the pingback spell, the dragon evaluates the distance to the caster
+- if the caster is within the maximum FXRange and there is no absorbing actor or the caster is closer than the absorbing actor, the caster is designated the absorbing actor
+- on the dragon's update, if the absorbing actor exists, the loop stops, the death FX play, and the dragon's soul is absorbed
+- otherwise, the dragon recasts the AoE spell
+- if the closest absorbing actor is a dragon, give it 1 dragon soul + our dragon souls
+- if the closest absorbing actor is the player, just give it our dragon souls since it gets one from the effects sequence already
+- go to state DeadComplete
